@@ -1,4 +1,4 @@
-                            <!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 	<head>
 		<meta name="viewport" content="width=device-width" />
@@ -6,6 +6,7 @@
 	</head>
 	<body>
 		<section>
+			<h2>sRGB</h2>
 			<div>
 				<label>R: <input type="range" min="0" max="255" value="255" id="rgb-red" /></label>
 				<span id="rgb-r-val">255</span>
@@ -19,8 +20,9 @@
 				<span id="rgb-b-val">0</span>
 			</div>
 		</section>
-		<hr>
+		<canvas id="rgb-canvas"></canvas>
 		<section>
+			<h2>Linear RGB</h2>
 			<div>
 				<label>R: <input type="range" min="0" max="255" value="255" id="srgb-red" /></label>
 				<span id="srgb-r-val">255</span>
@@ -34,8 +36,9 @@
 				<span id="srgb-b-val">0</span>
 			</div>
 		</section>
-		<hr>
+		<canvas id="srgb-canvas"></canvas>
 		<section>
+			<h2>HSL</h2>
 			<div>
 				<label>H: <input type="range" min="0" max="360" value="360" id="hsl-hue" /></label>
 				<span id="hsl-h-val">360</span>
@@ -49,8 +52,9 @@
 				<span id="hsl-l-val">0</span>
 			</div>
 		</section>
-		<hr>
+		<canvas id="hsl-canvas"></canvas>
 		<section>
+			<h2>CMYK</h2>
 			<div>
 				<label>C: <input type="range" min="0" max="100" value="100" id="cmyk-cyan" /></label>
 				<span id="cmyk-c-val">360</span>
@@ -68,8 +72,9 @@
 				<span id="cmyk-k-val">0</span>
 			</div>
 		</section>
-		<hr>
+		<canvas id="cmyk-canvas"></canvas>
 		<section>
+			<h2>Oklab</h2>
 			<div>
 				<label>L: <input type="range" min="0" max="100" value="360" id="oklab-l" /></label>
 				<span id="oklab-l-val">360</span>
@@ -83,6 +88,7 @@
 				<span id="oklab-b-val">0</span>
 			</div>
 		</section>
+		<canvas id="oklab-canvas"></canvas>
 		
 		<script>
 // ----- Conversion ----- \\
@@ -409,6 +415,39 @@ function updateValues(rgbR, rgbG, rgbB, hslH, hslS, hslL,
   oklabLVal.textContent = Number(okLabL).toFixed(3);
   oklabAVal.textContent = Number(okLabA).toFixed(3);
   oklabBVal.textContent = Number(okLabB).toFixed(3);
+  
+  renderColorSliceUnified({
+    canvas: document.getElementById('rgb-canvas'),
+    width: 256,
+    height: 256,
+    space: "rgb",
+    xChannel: "r",
+    yChannel: "g",
+    locked: { b: rgbB },
+    markerSpace: [rgbR, rgbG, rgbB]
+  });
+  
+  renderColorSliceUnified({
+    canvas: document.getElementById('hsl-canvas'),
+    width: 256,
+    height: 256,
+    space: "hsl",
+    xChannel: "h",
+    yChannel: "s",
+    locked: { l: hslL },
+    markerSpace: [hslH, hslS, hslL]
+  });
+  
+  renderColorSliceUnified({
+    canvas: document.getElementById('oklab-canvas'),
+    width: 300,
+    height: 300,
+    space: "oklab",
+    xChannel: "L",
+    yChannel: "a",
+    locked: { b: okLabB },
+    markerSpace: [okLabL, okLabA, okLabB]
+  });
 }
 
 // When changing gamma RGB UI: update everything else
@@ -549,6 +588,117 @@ function updateFromOklab() {
   );
 }
 
+// ----- Rendering ----- \\
+
+/**
+ * Unified 2D color-space slice renderer
+ *
+ * Params:
+ *   canvas       - HTMLCanvasElement
+ *   width,height - canvas size
+ *   space        - registry key ("rgb", "hsl", "oklab", etc)
+ *   xChannel     - which channel appears on X axis
+ *   yChannel     - which channel appears on Y axis
+ *   locked       - object {channelName: value}
+ *   markerSpace  - optional color in THIS space, e.g. [h,s,l]
+ */
+function renderColorSliceUnified({
+  canvas,
+  width,
+  height,
+  space,
+  xChannel,
+  yChannel,
+  locked = {},
+  markerSpace = null,
+}) {
+  const cs = ColorSpaces[space];
+  if (!cs) throw new Error("Unknown color space: " + space);
+
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(width, height);
+  const data = img.data;
+
+  let ptr = 0;
+  for (let py = 0; py < height; py++) {
+    const yNorm = py / (height - 1);
+
+    for (let px = 0; px < width; px++) {
+      const xNorm = px / (width - 1);
+
+      // 1) space-specific mapping (x,y ? full coords)
+      const coords = cs.mapPixel({
+        x: xNorm,
+        y: yNorm,
+        xChannel,
+        yChannel,
+        locked
+      });
+
+      // 2) convert to sRGB for display
+      const [r, g, b] = cs.toRgb(coords);
+
+      data[ptr++] = r;
+      data[ptr++] = g;
+      data[ptr++] = b;
+      data[ptr++] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+
+  // MARKER ----------------------------------------------------
+  if (markerSpace) {
+    const marker = {};
+
+    // Convert marker coords into normalized XY space
+    // We use inverse of `mapPixel` rules
+    if (xChannel === "h") marker.x = markerSpace[0] / 360;
+    if (xChannel === "s") marker.x = markerSpace[1];
+    if (xChannel === "l") marker.x = markerSpace[2];
+    if (xChannel === "v") marker.x = markerSpace[2];
+    if (xChannel === "r") marker.x = markerSpace[0] / 255;
+    if (xChannel === "g") marker.x = markerSpace[1] / 255;
+    if (xChannel === "b") marker.x = markerSpace[2] / 255;
+    if (xChannel === "L") marker.x = markerSpace[0];
+    if (xChannel === "a") marker.x = (markerSpace[1] + 1) / 2;
+    if (xChannel === "y") marker.x = markerSpace[2];
+    if (xChannel === "k") marker.x = markerSpace[3];
+    // etc — you can refine per space if needed
+
+    if (yChannel === "h") marker.y = markerSpace[0] / 360;
+    if (yChannel === "s") marker.y = markerSpace[1];
+    if (yChannel === "l") marker.y = markerSpace[2];
+    if (yChannel === "v") marker.y = markerSpace[2];
+    if (yChannel === "r") marker.y = markerSpace[0] / 255;
+    if (yChannel === "g") marker.y = markerSpace[1] / 255;
+    if (yChannel === "b") marker.y = markerSpace[2] / 255;
+    if (yChannel === "L") marker.y = markerSpace[0];
+    if (yChannel === "a") marker.y = (markerSpace[1] + 1) / 2;
+    if (yChannel === "y") marker.y = markerSpace[2];
+    if (yChannel === "k") marker.y = markerSpace[3];
+
+    const mx = Math.round(marker.x * (width - 1));
+    const my = Math.round(marker.y * (height - 1));
+
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(mx, my, 6, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(mx, my, 8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+
 // ----- Init ----- \\
 
 [rgbRed, rgbGreen, rgbBlue].forEach((e) => {
@@ -570,6 +720,120 @@ function updateFromOklab() {
 [oklabL, oklabA, oklabB].forEach((e) => {
   e.addEventListener('input', updateFromOklab);
 });
+
+//
+// COLOR SPACE TRANSFORM REGISTRY
+// Every space supplies:
+//  - channels: array of channel IDs
+//  - mapPixel(): convert (xValue, yValue, lockedChannels) ? that space's full coordinate set
+//  - toRgb(): convert from that space ? sRGB 0–255
+//
+
+const ColorSpaces = {
+  rgb: {
+    channels: ["r", "g", "b"],
+
+    mapPixel({ x, y, xChannel, yChannel, locked }) {
+      const v = { ...locked };
+      v[xChannel] = x * 255;
+      v[yChannel] = y * 255;
+      return [v.r ?? 0, v.g ?? 0, v.b ?? 0];
+    },
+
+    toRgb([r, g, b]) {
+      return [Math.round(r), Math.round(g), Math.round(b)];
+    }
+  },
+
+  hsl: {
+    channels: ["h", "s", "l"],
+
+    mapPixel({ x, y, xChannel, yChannel, locked }) {
+      const v = { ...locked };
+      // h = 0–360, s & l = 0–1
+      if (xChannel === "h") v.h = x * 360;
+      if (xChannel === "s") v.s = x;
+      if (xChannel === "l") v.l = x;
+
+      if (yChannel === "h") v.h = y * 360;
+      if (yChannel === "s") v.s = y;
+      if (yChannel === "l") v.l = y;
+
+      return [v.h ?? 0, v.s ?? 0, v.l ?? 0];
+    },
+
+    toRgb([h, s, l]) {
+      return hslToRgb(h, s, l); // must return [0–255]
+    }
+  },
+
+  hsv: {
+    channels: ["h", "s", "v"],
+
+    mapPixel({ x, y, xChannel, yChannel, locked }) {
+      const v = { ...locked };
+      if (xChannel === "h") v.h = x * 360;
+      if (xChannel === "s") v.s = x;
+      if (xChannel === "v") v.v = x;
+
+      if (yChannel === "h") v.h = y * 360;
+      if (yChannel === "s") v.s = y;
+      if (yChannel === "v") v.v = y;
+
+      return [v.h ?? 0, v.s ?? 0, v.v ?? 0];
+    },
+
+    toRgb([h, s, v]) {
+      return hsvToRgb(h, s, v);
+    }
+  },
+
+  oklab: {
+    channels: ["L", "a", "b"],
+
+    mapPixel({ x, y, xChannel, yChannel, locked }) {
+      const v = { ...locked };
+
+      const setVal = (ch, val) => {
+        if (ch === "L") v.L = val;
+        if (ch === "a") v.a = val * 2 - 1; // range -1 to +1
+        if (ch === "b") v.b = val * 2 - 1;
+      };
+
+      setVal(xChannel, x);
+      setVal(yChannel, y);
+
+      return [v.L ?? 0, v.a ?? 0, v.b ?? 0];
+    },
+
+    toRgb([L, a, b]) {
+      return linearRgbToLinear8(oklabToRgb_linear01(L, a, b)); // must return sRGB 0–255
+    }
+  },
+
+  cmyk: {
+    channels: ["c", "m", "y", "k"],
+
+    mapPixel({ x, y, xChannel, yChannel, locked }) {
+      const v = { ...locked };
+      if (xChannel === "c") v.c = x;
+      if (xChannel === "m") v.m = x;
+      if (xChannel === "y") v.y = x;
+      if (xChannel === "k") v.k = x;
+
+      if (yChannel === "c") v.c = y;
+      if (yChannel === "m") v.m = y;
+      if (yChannel === "y") v.y = y;
+      if (yChannel === "k") v.k = y;
+
+      return [v.c ?? 0, v.m ?? 0, v.y ?? 0, v.k ?? 0];
+    },
+
+    toRgb([c, m, y, k]) {
+      return cmykToRgb(c, m, y, k); // must return sRGB 0–255
+    }
+  },
+};
 
 // Initialize display once from existing values
 updateFromRgb();
