@@ -175,6 +175,29 @@
 			<canvas id="oklab-canvas"></canvas>
 			
 			<section>
+				<h2>OklCh</h2>
+				
+				<select id="oklch-axis">
+					<option value="L">Lightness locked</option>
+					<option value="c">Chroma locked</option>
+					<option value="h">Hue locked</option>
+				</select>
+				<div>
+					<label>L: <input type="range" min="0" max="100" value="100" id="oklch-l" /></label>
+					<span id="oklch-l-val">100</span>
+				</div>
+				<div>
+					<label>a: <input type="range" min="0" max="100" value="0" id="oklch-c" /></label>
+					<span id="oklch-c-val">0</span>
+				</div>
+				<div>
+					<label>b: <input type="range" min="0" max="360" value="0" id="oklch-h" /></label>
+					<span id="oklch-h-val">0</span>
+				</div>
+			</section>
+			<canvas id="oklch-canvas"></canvas>
+			
+			<section>
 				<h2>YCbCr</h2>
 				
 				<select id="ycbcr-axis">
@@ -197,6 +220,4 @@
 			</section>
 			<canvas id="ycbcr-canvas"></canvas>
 		</div>
-		<script src="script.js"></script>
-	</body>
-</html>
+		<script>
