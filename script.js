@@ -1,19 +1,7 @@
-// ----- Conversion ----- \\
-
-// Helper: clamp a number to [min,max]
 function clamp(v, min = 0, max = 1) {
   return Math.min(max, Math.max(min, Number(v)));
 }
 
-/*
- * Conventions:
- * UI gamma sRGB (rgb-* sliders): 0..255 integers (gamma encoded)
- * UI linear sRGB (srgb-* sliders): linear values scaled to 0..255 (so 1.0 -> 255)
- * Internal linear RGB for matrix math and Oklab: 0..1 floating
- * Oklab UI: L 0..100, a/b around ±50 (we keep the existing *100 scaling)
- */
-
-// SRGB 8-bit (0..255, gamma) -> linear 0..1
 function srgb8ToLinearChannel(v8bit) {
   const v = clamp(Number(v8bit), 0, 255) / 255;
   if (v <= 0.04045) return v / 12.92;
@@ -21,7 +9,6 @@ function srgb8ToLinearChannel(v8bit) {
   return ((v + 0.055) / 1.055) ** 2.4;
 }
 
-// Linear 0..1 -> sRGB 8-bit 0..255 (gamma corrected), rounded
 function linear01ToSrgb8(lin) {
   const v = clamp(Number(lin), 0, 1);
   let sr = 0;
@@ -31,17 +18,14 @@ function linear01ToSrgb8(lin) {
   return Math.round(sr * 255);
 }
 
-// Linear 0..1 -> UI linear 0..255 (just scale)
 function linear01ToLinear8(lin) {
   return Math.round(clamp(Number(lin), 0, 1) * 255);
 }
 
-// UI linear 0..255 -> linear 0..1
 function linear8ToLinear01(v8) {
   return clamp(Number(v8), 0, 255) / 255;
 }
 
-// Tuple helpers
 function srgb8ToLinearRgb([R, G, B]) {
   return [
     srgb8ToLinearChannel(R),
@@ -74,7 +58,6 @@ function linear8ToLinearRgb([r8, g8, b8]) {
   ];
 }
 
-// RGB <-> HSL (expect/supply gamma 0..255 for RGB, H 0..360, S/L 0..100)
 function rgbToHsl(R, G, B) {
   const r = clamp(Number(R), 0, 255) / 255;
   const g = clamp(Number(G), 0, 255) / 255;
@@ -187,7 +170,6 @@ function rgbToHsv(R, G, B) {
 }
 
 function hsvToRgb(H, S, V) {
-  // Normalize 0..1
   const h = (((Number(H) % 360) + 360) % 360) / 360;
   const s = clamp(Number(S), 0, 100) / 100;
   const v = clamp(Number(V), 0, 100) / 100;
@@ -198,7 +180,6 @@ function hsvToRgb(H, S, V) {
     return [val, val, val];
   }
 
-  // Sector 0..5
   const i = Math.floor(h * 6);
   const f = h * 6 - i;
   const p = v * (1 - s);
@@ -245,7 +226,6 @@ function hsvToRgb(H, S, V) {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
 
-// RGB <-> CMYK (expect/supply gamma 0..255 for RGB, CMYK 0..100)
 function rgbToCmyk(R, G, B) {
   const r = Math.max(0, Math.min(255, Math.round(Number(R))));
   const g = Math.max(0, Math.min(255, Math.round(Number(G))));
@@ -284,9 +264,7 @@ function cmykToRgb(c, m, y, k) {
   return [r, g, b];
 }
 
-// Oklab conversions - expect linear RGB in 0..1 as inputs, return Oklab scaled for UI (L*100, a*100, b*100)
 function rgbToOklab_linear01(r, g, b) {
-  // The r,g,b are linear 0..1
   const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
   const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
   const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
@@ -302,7 +280,6 @@ function rgbToOklab_linear01(r, g, b) {
   return [L * 100, a * 100, bV * 100];
 }
 
-// Accept Oklab UI values (L 0..100, a/b approx ±50) and return linear RGB 0..1
 function oklabToRgb_linear01(oklab_L, oklab_a, oklab_b) {
   const L = Number(oklab_L) / 100;
   const a = Number(oklab_a) / 100;
@@ -319,23 +296,10 @@ function oklabToRgb_linear01(oklab_L, oklab_a, oklab_b) {
   const rgb_r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
   const rgb_g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
   const rgb_b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
-  // Linear 0..1 (may be out of gamut <0 or >1)
 
   return [rgb_r, rgb_g, rgb_b];
 }
 
-/*
- * Assumes BT.709 luma coefficients, linear RGB 0..1 in and out,
- * and the limited (studio) ranges: Y 16..235, Cb/Cr 16..240.
- *
- * Notes:
- * - Use these for linear RGB; if starting from sRGB, gamma-decode first.
- * - Results are floats; clamp to [0,1] for display if needed.
- */
-
-// === Constants for BT.709 (studio range) ===
-
-// Convert linear RGB (0..1) to limited-range YCbCr (Y 16..235, Cb/Cr 16..240)
 function rgbToYCbCr_limited(r, g, b) {
   const Kr = 0.2126;
   const Kg = 0.7152;
@@ -346,11 +310,6 @@ function rgbToYCbCr_limited(r, g, b) {
   const C_MIN = 16.0;
   const C_MAX = 240.0;
 
-  /*
-   *Scale factors between full-range luma/chroma and limited-range integers
-   * For luma: full-range Yf in [0,1] maps to Yint = Y_MIN + Yf*(Y_MAX-Y_MIN)
-   * For chroma: chroma full-range typically in [-0.5, +0.5] (center 0) maps to Cint = mid + chroma*scale
-   */
   const Y_SCALE = (Y_MAX - Y_MIN);
   const C_SCALE = (C_MAX - C_MIN);
   const C_MID = (C_MIN + C_MAX) / 2.0;
@@ -374,7 +333,6 @@ function rgbToYCbCr_limited(r, g, b) {
   return [Yint, CbInt, CrInt];
 }
 
-// Convert limited-range YCbCr (Y 16..235, Cb/Cr 16..240) to linear RGB 0..1
 function ycbcrToRgb_limited(Yint, CbInt, CrInt) {
   const Kr = 0.2126;
   const Kg = 0.7152;
@@ -384,12 +342,6 @@ function ycbcrToRgb_limited(Yint, CbInt, CrInt) {
   const Y_MAX = 235.0;
   const C_MIN = 16.0;
   const C_MAX = 240.0;
-
-  /*
-   * Scale factors between full-range luma/chroma and limited-range integers
-   * For luma: full-range Yf in [0,1] maps to Yint = Y_MIN + Yf*(Y_MAX-Y_MIN)
-   * For chroma: chroma full-range typically in [-0.5, +0.5] (center 0) maps to Cint = mid + chroma*scale
-   */
 
   const Y_SCALE = (Y_MAX - Y_MIN);
   const C_SCALE = (C_MAX - C_MIN);
@@ -403,14 +355,6 @@ function ycbcrToRgb_limited(Yint, CbInt, CrInt) {
   const CbF = (CbInt - C_MID) / C_SCALE;
   const CrF = (CrInt - C_MID) / C_SCALE;
 
-  /*
-   * Recover RGB:
-   * From definitions:
-   * B = Y + (2*(1 - Kb))*Cb
-   * R = Y + (2*(1 - Kr))*Cr
-   * G = (Y - Kr*R - Kb*B) / Kg
-   */
-
   const b = Yf + 2 * (1 - Kb) * CbF;
   const r = Yf + 2 * (1 - Kr) * CrF;
   const g = (Yf - Kr * r - Kb * b) / Kg;
@@ -418,7 +362,145 @@ function ycbcrToRgb_limited(Yint, CbInt, CrInt) {
   return [r, g, b];
 }
 
-// ----- Selectors ----- \\
+function oklchToAb(L, C, h) {
+  const a = C * Math.cos(h);
+  const b = C * Math.sin(h);
+
+  return [a, b];
+}
+
+function oklchToRgb_linear01(L100, C, hDeg) {
+  const [L, a, b] = oklchToOklab(L100, C, hDeg);
+
+  return oklabToRgb_linear01(L, a, b);
+}
+
+function oklchToOklab(L100, C, hDeg) {
+  const L = L100 / 100;
+  const h = (hDeg * Math.PI) / 180;
+
+  return [
+    L,
+    C * Math.cos(h),
+    C * Math.sin(h),
+  ];
+}
+
+function rgbToOklch_linear01(r, g, b) {
+  const [L, a, bV] = rgbToOklab_linear01(r, g, b);
+  const C = Math.sqrt(a * a + bV * bV);
+  let h = (Math.atan2(bV, a) * 180) / Math.PI;
+  if (h < 0) h += 360;
+
+  return [L * 100, C, h];
+}
+
+function splashToRgb(splash) {
+  const rgbColoursList = [
+    [  0,   0, 0], [  0,   0, 28], [  0,   0, 56], [  0,   0, 85], [  0,   0, 113], [  0,   0, 141], [  0,   0, 170], [  0,   0, 198], [  0,   0, 226], [  0,   0, 255],
+    [  0,  28, 0], [  0,  28, 28], [  0,  28, 56], [  0,  28, 85], [  0,  28, 113], [  0,  28, 141], [  0,  28, 170], [  0,  28, 198], [  0,  28, 226], [  0,  28, 255],
+    [  0,  56, 0], [  0,  56, 28], [  0,  56, 56], [  0,  56, 85], [  0,  56, 113], [  0,  56, 141], [  0,  56, 170], [  0,  56, 198], [  0,  56, 226], [  0,  56, 255],
+    [  0,  85, 0], [  0,  85, 28], [  0,  85, 56], [  0,  85, 85], [  0,  85, 113], [  0,  85, 141], [  0,  85, 170], [  0,  85, 198], [  0,  85, 226], [  0,  85, 255],
+    [  0, 113, 0], [  0, 113, 28], [  0, 113, 56], [  0, 113, 85], [  0, 113, 113], [  0, 113, 141], [  0, 113, 170], [  0, 113, 198], [  0, 113, 226], [  0, 113, 255],
+    [  0, 141, 0], [  0, 141, 28], [  0, 141, 56], [  0, 141, 85], [  0, 141, 113], [  0, 141, 141], [  0, 141, 170], [  0, 141, 198], [  0, 141, 226], [  0, 141, 255],
+    [  0, 170, 0], [  0, 170, 28], [  0, 170, 56], [  0, 170, 85], [  0, 170, 113], [  0, 170, 141], [  0, 170, 170], [  0, 170, 198], [  0, 170, 226], [  0, 170, 255],
+    [  0, 198, 0], [  0, 198, 28], [  0, 198, 56], [  0, 198, 85], [  0, 198, 113], [  0, 198, 141], [  0, 198, 170], [  0, 198, 198], [  0, 198, 226], [  0, 198, 255],
+    [  0, 226, 0], [  0, 226, 28], [  0, 226, 56], [  0, 226, 85], [  0, 226, 113], [  0, 226, 141], [  0, 226, 170], [  0, 226, 198], [  0, 226, 226], [  0, 226, 255],
+    [  0, 255, 0], [  0, 255, 28], [  0, 255, 56], [  0, 255, 85], [  0, 255, 113], [  0, 255, 141], [  0, 255, 170], [  0, 255, 198], [  0, 255, 226], [  0, 255, 255],
+    [ 28,   0, 0], [ 28,   0, 28], [ 28,   0, 56], [ 28,   0, 85], [ 28,   0, 113], [ 28,   0, 141], [ 28,   0, 170], [ 28,   0, 198], [ 28,   0, 226], [ 28,   0, 255],
+    [ 28,  28, 0], [ 28,  28, 28], [ 28,  28, 56], [ 28,  28, 85], [ 28,  28, 113], [ 28,  28, 141], [ 28,  28, 170], [ 28,  28, 198], [ 28,  28, 226], [ 28,  28, 255],
+    [ 28,  56, 0], [ 28,  56, 28], [ 28,  56, 56], [ 28,  56, 85], [ 28,  56, 113], [ 28,  56, 141], [ 28,  56, 170], [ 28,  56, 198], [ 28,  56, 226], [ 28,  56, 255],
+    [ 28,  85, 0], [ 28,  85, 28], [ 28,  85, 56], [ 28,  85, 85], [ 28,  85, 113], [ 28,  85, 141], [ 28,  85, 170], [ 28,  85, 198], [ 28,  85, 226], [ 28,  85, 255],
+    [ 28, 113, 0], [ 28, 113, 28], [ 28, 113, 56], [ 28, 113, 85], [ 28, 113, 113], [ 28, 113, 141], [ 28, 113, 170], [ 28, 113, 198], [ 28, 113, 226], [ 28, 113, 255],
+    [ 28, 141, 0], [ 28, 141, 28], [ 28, 141, 56], [ 28, 141, 85], [ 28, 141, 113], [ 28, 141, 141], [ 28, 141, 170], [ 28, 141, 198], [ 28, 141, 226], [ 28, 141, 255],
+    [ 28, 170, 0], [ 28, 170, 28], [ 28, 170, 56], [ 28, 170, 85], [ 28, 170, 113], [ 28, 170, 141], [ 28, 170, 170], [ 28, 170, 198], [ 28, 170, 226], [ 28, 170, 255],
+    [ 28, 198, 0], [ 28, 198, 28], [ 28, 198, 56], [ 28, 198, 85], [ 28, 198, 113], [ 28, 198, 141], [ 28, 198, 170], [ 28, 198, 198], [ 28, 198, 226], [ 28, 198, 255],
+    [ 28, 226, 0], [ 28, 226, 28], [ 28, 226, 56], [ 28, 226, 85], [ 28, 226, 113], [ 28, 226, 141], [ 28, 226, 170], [ 28, 226, 198], [ 28, 226, 226], [ 28, 226, 255],
+    [ 28, 255, 0], [ 28, 255, 28], [ 28, 255, 56], [ 28, 255, 85], [ 28, 255, 113], [ 28, 255, 141], [ 28, 255, 170], [ 28, 255, 198], [ 28, 255, 226], [ 28, 255, 255],
+    [ 56,   0, 0], [ 56,   0, 28], [ 56,   0, 56], [ 56,   0, 85], [ 56,   0, 113], [ 56,   0, 141], [ 56,   0, 170], [ 56,   0, 198], [ 56,   0, 226], [ 56,   0, 255],
+    [ 56,  28, 0], [ 56,  28, 28], [ 56,  28, 56], [ 56,  28, 85], [ 56,  28, 113], [ 56,  28, 141], [ 56,  28, 170], [ 56,  28, 198], [ 56,  28, 226], [ 56,  28, 255],
+    [ 56,  56, 0], [ 56,  56, 28], [ 56,  56, 56], [ 56,  56, 85], [ 56,  56, 113], [ 56,  56, 141], [ 56,  56, 170], [ 56,  56, 198], [ 56,  56, 226], [ 56,  56, 255],
+    [ 56,  85, 0], [ 56,  85, 28], [ 56,  85, 56], [ 56,  85, 85], [ 56,  85, 113], [ 56,  85, 141], [ 56,  85, 170], [ 56,  85, 198], [ 56,  85, 226], [ 56,  85, 255],
+    [ 56, 113, 0], [ 56, 113, 28], [ 56, 113, 56], [ 56, 113, 85], [ 56, 113, 113], [ 56, 113, 141], [ 56, 113, 170], [ 56, 113, 198], [ 56, 113, 226], [ 56, 113, 255],
+    [ 56, 141, 0], [ 56, 141, 28], [ 56, 141, 56], [ 56, 141, 85], [ 56, 141, 113], [ 56, 141, 141], [ 56, 141, 170], [ 56, 141, 198], [ 56, 141, 226], [ 56, 141, 255],
+    [ 56, 170, 0], [ 56, 170, 28], [ 56, 170, 56], [ 56, 170, 85], [ 56, 170, 113], [ 56, 170, 141], [ 56, 170, 170], [ 56, 170, 198], [ 56, 170, 226], [ 56, 170, 255],
+    [ 56, 198, 0], [ 56, 198, 28], [ 56, 198, 56], [ 56, 198, 85], [ 56, 198, 113], [ 56, 198, 141], [ 56, 198, 170], [ 56, 198, 198], [ 56, 198, 226], [ 56, 198, 255],
+    [ 56, 226, 0], [ 56, 226, 28], [ 56, 226, 56], [ 56, 226, 85], [ 56, 226, 113], [ 56, 226, 141], [ 56, 226, 170], [ 56, 226, 198], [ 56, 226, 226], [ 56, 226, 255],
+    [ 56, 255, 0], [ 56, 255, 28], [ 56, 255, 56], [ 56, 255, 85], [ 56, 255, 113], [ 56, 255, 141], [ 56, 255, 170], [ 56, 255, 198], [ 56, 255, 226], [ 56, 255, 255],
+    [ 85,   0, 0], [ 85,   0, 28], [ 85,   0, 56], [ 85,   0, 85], [ 85,   0, 113], [ 85,   0, 141], [ 85,   0, 170], [ 85,   0, 198], [ 85,   0, 226], [ 85,   0, 255],
+    [ 85,  28, 0], [ 85,  28, 28], [ 85,  28, 56], [ 85,  28, 85], [ 85,  28, 113], [ 85,  28, 141], [ 85,  28, 170], [ 85,  28, 198], [ 85,  28, 226], [ 85,  28, 255],
+    [ 85,  56, 0], [ 85,  56, 28], [ 85,  56, 56], [ 85,  56, 85], [ 85,  56, 113], [ 85,  56, 141], [ 85,  56, 170], [ 85,  56, 198], [ 85,  56, 226], [ 85,  56, 255],
+    [ 85,  85, 0], [ 85,  85, 28], [ 85,  85, 56], [ 85,  85, 85], [ 85,  85, 113], [ 85,  85, 141], [ 85,  85, 170], [ 85,  85, 198], [ 85,  85, 226], [ 85,  85, 255],
+    [ 85, 113, 0], [ 85, 113, 28], [ 85, 113, 56], [ 85, 113, 85], [ 85, 113, 113], [ 85, 113, 141], [ 85, 113, 170], [ 85, 113, 198], [ 85, 113, 226], [ 85, 113, 255],
+    [ 85, 141, 0], [ 85, 141, 28], [ 85, 141, 56], [ 85, 141, 85], [ 85, 141, 113], [ 85, 141, 141], [ 85, 141, 170], [ 85, 141, 198], [ 85, 141, 226], [ 85, 141, 255],
+    [ 85, 170, 0], [ 85, 170, 28], [ 85, 170, 56], [ 85, 170, 85], [ 85, 170, 113], [ 85, 170, 141], [ 85, 170, 170], [ 85, 170, 198], [ 85, 170, 226], [ 85, 170, 255],
+    [ 85, 198, 0], [ 85, 198, 28], [ 85, 198, 56], [ 85, 198, 85], [ 85, 198, 113], [ 85, 198, 141], [ 85, 198, 170], [ 85, 198, 198], [ 85, 198, 226], [ 85, 198, 255],
+    [ 85, 226, 0], [ 85, 226, 28], [ 85, 226, 56], [ 85, 226, 85], [ 85, 226, 113], [ 85, 226, 141], [ 85, 226, 170], [ 85, 226, 198], [ 85, 226, 226], [ 85, 226, 255],
+    [ 85, 255, 0], [ 85, 255, 28], [ 85, 255, 56], [ 85, 255, 85], [ 85, 255, 113], [ 85, 255, 141], [ 85, 255, 170], [ 85, 255, 198], [ 85, 255, 226], [ 85, 255, 255],
+    [113,   0, 0], [113,   0, 28], [113,   0, 56], [113,   0, 85], [113,   0, 113], [113,   0, 141], [113,   0, 170], [113,   0, 198], [113,   0, 226], [113,   0, 255],
+    [113,  28, 0], [113,  28, 28], [113,  28, 56], [113,  28, 85], [113,  28, 113], [113,  28, 141], [113,  28, 170], [113,  28, 198], [113,  28, 226], [113,  28, 255],
+    [113,  56, 0], [113,  56, 28], [113,  56, 56], [113,  56, 85], [113,  56, 113], [113,  56, 141], [113,  56, 170], [113,  56, 198], [113,  56, 226], [113,  56, 255],
+    [113,  85, 0], [113,  85, 28], [113,  85, 56], [113,  85, 85], [113,  85, 113], [113,  85, 141], [113,  85, 170], [113,  85, 198], [113,  85, 226], [113,  85, 255],
+    [113, 113, 0], [113, 113, 28], [113, 113, 56], [113, 113, 85], [113, 113, 113], [113, 113, 141], [113, 113, 170], [113, 113, 198], [113, 113, 226], [113, 113, 255],
+    [113, 141, 0], [113, 141, 28], [113, 141, 56], [113, 141, 85], [113, 141, 113], [113, 141, 141], [113, 141, 170], [113, 141, 198], [113, 141, 226], [113, 141, 255],
+    [113, 170, 0], [113, 170, 28], [113, 170, 56], [113, 170, 85], [113, 170, 113], [113, 170, 141], [113, 170, 170], [113, 170, 198], [113, 170, 226], [113, 170, 255],
+    [113, 198, 0], [113, 198, 28], [113, 198, 56], [113, 198, 85], [113, 198, 113], [113, 198, 141], [113, 198, 170], [113, 198, 198], [113, 198, 226], [113, 198, 255],
+    [113, 226, 0], [113, 226, 28], [113, 226, 56], [113, 226, 85], [113, 226, 113], [113, 226, 141], [113, 226, 170], [113, 226, 198], [113, 226, 226], [113, 226, 255],
+    [113, 255, 0], [113, 255, 28], [113, 255, 56], [113, 255, 85], [113, 255, 113], [113, 255, 141], [113, 255, 170], [113, 255, 198], [113, 255, 226], [113, 255, 255],
+    [141,   0, 0], [141,   0, 28], [141,   0, 56], [141,   0, 85], [141,   0, 113], [141,   0, 141], [141,   0, 170], [141,   0, 198], [141,   0, 226], [141,   0, 255],
+    [141,  28, 0], [141,  28, 28], [141,  28, 56], [141,  28, 85], [141,  28, 113], [141,  28, 141], [141,  28, 170], [141,  28, 198], [141,  28, 226], [141,  28, 255],
+    [141,  56, 0], [141,  56, 28], [141,  56, 56], [141,  56, 85], [141,  56, 113], [141,  56, 141], [141,  56, 170], [141,  56, 198], [141,  56, 226], [141,  56, 255],
+    [141,  85, 0], [141,  85, 28], [141,  85, 56], [141,  85, 85], [141,  85, 113], [141,  85, 141], [141,  85, 170], [141,  85, 198], [141,  85, 226], [141,  85, 255],
+    [141, 113, 0], [141, 113, 28], [141, 113, 56], [141, 113, 85], [141, 113, 113], [141, 113, 141], [141, 113, 170], [141, 113, 198], [141, 113, 226], [141, 113, 255],
+    [141, 141, 0], [141, 141, 28], [141, 141, 56], [141, 141, 85], [141, 141, 113], [141, 141, 141], [141, 141, 170], [141, 141, 198], [141, 141, 226], [141, 141, 255],
+    [141, 170, 0], [141, 170, 28], [141, 170, 56], [141, 170, 85], [141, 170, 113], [141, 170, 141], [141, 170, 170], [141, 170, 198], [141, 170, 226], [141, 170, 255],
+    [141, 198, 0], [141, 198, 28], [141, 198, 56], [141, 198, 85], [141, 198, 113], [141, 198, 141], [141, 198, 170], [141, 198, 198], [141, 198, 226], [141, 198, 255],
+    [141, 226, 0], [141, 226, 28], [141, 226, 56], [141, 226, 85], [141, 226, 113], [141, 226, 141], [141, 226, 170], [141, 226, 198], [141, 226, 226], [141, 226, 255],
+    [141, 255, 0], [141, 255, 28], [141, 255, 56], [141, 255, 85], [141, 255, 113], [141, 255, 141], [141, 255, 170], [141, 255, 198], [141, 255, 226], [141, 255, 255],
+    [170,   0, 0], [170,   0, 28], [170,   0, 56], [170,   0, 85], [170,   0, 113], [170,   0, 141], [170,   0, 170], [170,   0, 198], [170,   0, 226], [170,   0, 255],
+    [170,  28, 0], [170,  28, 28], [170,  28, 56], [170,  28, 85], [170,  28, 113], [170,  28, 141], [170,  28, 170], [170,  28, 198], [170,  28, 226], [170,  28, 255],
+    [170,  56, 0], [170,  56, 28], [170,  56, 56], [170,  56, 85], [170,  56, 113], [170,  56, 141], [170,  56, 170], [170,  56, 198], [170,  56, 226], [170,  56, 255],
+    [170,  85, 0], [170,  85, 28], [170,  85, 56], [170,  85, 85], [170,  85, 113], [170,  85, 141], [170,  85, 170], [170,  85, 198], [170,  85, 226], [170,  85, 255],
+    [170, 113, 0], [170, 113, 28], [170, 113, 56], [170, 113, 85], [170, 113, 113], [170, 113, 141], [170, 113, 170], [170, 113, 198], [170, 113, 226], [170, 113, 255],
+    [170, 141, 0], [170, 141, 28], [170, 141, 56], [170, 141, 85], [170, 141, 113], [170, 141, 141], [170, 141, 170], [170, 141, 198], [170, 141, 226], [170, 141, 255],
+    [170, 170, 0], [170, 170, 28], [170, 170, 56], [170, 170, 85], [170, 170, 113], [170, 170, 141], [170, 170, 170], [170, 170, 198], [170, 170, 226], [170, 170, 255],
+    [170, 198, 0], [170, 198, 28], [170, 198, 56], [170, 198, 85], [170, 198, 113], [170, 198, 141], [170, 198, 170], [170, 198, 198], [170, 198, 226], [170, 198, 255],
+    [170, 226, 0], [170, 226, 28], [170, 226, 56], [170, 226, 85], [170, 226, 113], [170, 226, 141], [170, 226, 170], [170, 226, 198], [170, 226, 226], [170, 226, 255],
+    [170, 255, 0], [170, 255, 28], [170, 255, 56], [170, 255, 85], [170, 255, 113], [170, 255, 141], [170, 255, 170], [170, 255, 198], [170, 255, 226], [170, 255, 255],
+    [198,   0, 0], [198,   0, 28], [198,   0, 56], [198,   0, 85], [198,   0, 113], [198,   0, 141], [198,   0, 170], [198,   0, 198], [198,   0, 226], [198,   0, 255],
+    [198,  28, 0], [198,  28, 28], [198,  28, 56], [198,  28, 85], [198,  28, 113], [198,  28, 141], [198,  28, 170], [198,  28, 198], [198,  28, 226], [198,  28, 255],
+    [198,  56, 0], [198,  56, 28], [198,  56, 56], [198,  56, 85], [198,  56, 113], [198,  56, 141], [198,  56, 170], [198,  56, 198], [198,  56, 226], [198,  56, 255],
+    [198,  85, 0], [198,  85, 28], [198,  85, 56], [198,  85, 85], [198,  85, 113], [198,  85, 141], [198,  85, 170], [198,  85, 198], [198,  85, 226], [198,  85, 255],
+    [198, 113, 0], [198, 113, 28], [198, 113, 56], [198, 113, 85], [198, 113, 113], [198, 113, 141], [198, 113, 170], [198, 113, 198], [198, 113, 226], [198, 113, 255],
+    [198, 141, 0], [198, 141, 28], [198, 141, 56], [198, 141, 85], [198, 141, 113], [198, 141, 141], [198, 141, 170], [198, 141, 198], [198, 141, 226], [198, 141, 255],
+    [198, 170, 0], [198, 170, 28], [198, 170, 56], [198, 170, 85], [198, 170, 113], [198, 170, 141], [198, 170, 170], [198, 170, 198], [198, 170, 226], [198, 170, 255],
+    [198, 198, 0], [198, 198, 28], [198, 198, 56], [198, 198, 85], [198, 198, 113], [198, 198, 141], [198, 198, 170], [198, 198, 198], [198, 198, 226], [198, 198, 255],
+    [198, 226, 0], [198, 226, 28], [198, 226, 56], [198, 226, 85], [198, 226, 113], [198, 226, 141], [198, 226, 170], [198, 226, 198], [198, 226, 226], [198, 226, 255],
+    [198, 255, 0], [198, 255, 28], [198, 255, 56], [198, 255, 85], [198, 255, 113], [198, 255, 141], [198, 255, 170], [198, 255, 198], [198, 255, 226], [198, 255, 255],
+    [226,   0, 0], [226,   0, 28], [226,   0, 56], [226,   0, 85], [226,   0, 113], [226,   0, 141], [226,   0, 170], [226,   0, 198], [226,   0, 226], [226,   0, 255],
+    [226,  28, 0], [226,  28, 28], [226,  28, 56], [226,  28, 85], [226,  28, 113], [226,  28, 141], [226,  28, 170], [226,  28, 198], [226,  28, 226], [226,  28, 255],
+    [226,  56, 0], [226,  56, 28], [226,  56, 56], [226,  56, 85], [226,  56, 113], [226,  56, 141], [226,  56, 170], [226,  56, 198], [226,  56, 226], [226,  56, 255],
+    [226,  85, 0], [226,  85, 28], [226,  85, 56], [226,  85, 85], [226,  85, 113], [226,  85, 141], [226,  85, 170], [226,  85, 198], [226,  85, 226], [226,  85, 255],
+    [226, 113, 0], [226, 113, 28], [226, 113, 56], [226, 113, 85], [226, 113, 113], [226, 113, 141], [226, 113, 170], [226, 113, 198], [226, 113, 226], [226, 113, 255],
+    [226, 141, 0], [226, 141, 28], [226, 141, 56], [226, 141, 85], [226, 141, 113], [226, 141, 141], [226, 141, 170], [226, 141, 198], [226, 141, 226], [226, 141, 255],
+    [226, 170, 0], [226, 170, 28], [226, 170, 56], [226, 170, 85], [226, 170, 113], [226, 170, 141], [226, 170, 170], [226, 170, 198], [226, 170, 226], [226, 170, 255],
+    [226, 198, 0], [226, 198, 28], [226, 198, 56], [226, 198, 85], [226, 198, 113], [226, 198, 141], [226, 198, 170], [226, 198, 198], [226, 198, 226], [226, 198, 255],
+    [226, 226, 0], [226, 226, 28], [226, 226, 56], [226, 226, 85], [226, 226, 113], [226, 226, 141], [226, 226, 170], [226, 226, 198], [226, 226, 226], [226, 226, 255],
+    [226, 255, 0], [226, 255, 28], [226, 255, 56], [226, 255, 85], [226, 255, 113], [226, 255, 141], [226, 255, 170], [226, 255, 198], [226, 255, 226], [226, 255, 255],
+    [255,   0, 0], [255,   0, 28], [255,   0, 56], [255,   0, 85], [255,   0, 113], [255,   0, 141], [255,   0, 170], [255,   0, 198], [255,   0, 226], [255,   0, 255],
+    [255,  28, 0], [255,  28, 28], [255,  28, 56], [255,  28, 85], [255,  28, 113], [255,  28, 141], [255,  28, 170], [255,  28, 198], [255,  28, 226], [255,  28, 255],
+    [255,  56, 0], [255,  56, 28], [255,  56, 56], [255,  56, 85], [255,  56, 113], [255,  56, 141], [255,  56, 170], [255,  56, 198], [255,  56, 226], [255,  56, 255],
+    [255,  85, 0], [255,  85, 28], [255,  85, 56], [255,  85, 85], [255,  85, 113], [255,  85, 141], [255,  85, 170], [255,  85, 198], [255,  85, 226], [255,  85, 255],
+    [255, 113, 0], [255, 113, 28], [255, 113, 56], [255, 113, 85], [255, 113, 113], [255, 113, 141], [255, 113, 170], [255, 113, 198], [255, 113, 226], [255, 113, 255],
+    [255, 141, 0], [255, 141, 28], [255, 141, 56], [255, 141, 85], [255, 141, 113], [255, 141, 141], [255, 141, 170], [255, 141, 198], [255, 141, 226], [255, 141, 255],
+    [255, 170, 0], [255, 170, 28], [255, 170, 56], [255, 170, 85], [255, 170, 113], [255, 170, 141], [255, 170, 170], [255, 170, 198], [255, 170, 226], [255, 170, 255],
+    [255, 198, 0], [255, 198, 28], [255, 198, 56], [255, 198, 85], [255, 198, 113], [255, 198, 141], [255, 198, 170], [255, 198, 198], [255, 198, 226], [255, 198, 255],
+    [255, 226, 0], [255, 226, 28], [255, 226, 56], [255, 226, 85], [255, 226, 113], [255, 226, 141], [255, 226, 170], [255, 226, 198], [255, 226, 226], [255, 226, 255],
+    [255, 255, 0], [255, 255, 28], [255, 255, 56], [255, 255, 85], [255, 255, 113], [255, 255, 141], [255, 255, 170], [255, 255, 198], [255, 255, 226], [255, 255, 255],
+  ];
+
+  return rgbColoursList[splash];
+}
 
 const rgbRed = document.getElementById('rgb-red');
 const rgbGreen = document.getElementById('rgb-green');
@@ -444,6 +526,10 @@ const srgbBlue = document.getElementById('srgb-blue');
 const oklabL = document.getElementById('oklab-l');
 const oklabA = document.getElementById('oklab-a');
 const oklabB = document.getElementById('oklab-b');
+
+const oklchL = document.getElementById('oklch-l');
+const oklchC = document.getElementById('oklch-c');
+const oklchH = document.getElementById('oklch-h');
 
 const ycbcrY = document.getElementById('ycbcr-y');
 const ycbcrCb = document.getElementById('ycbcr-cb');
@@ -474,6 +560,10 @@ const oklabLVal = document.getElementById('oklab-l-val');
 const oklabAVal = document.getElementById('oklab-a-val');
 const oklabBVal = document.getElementById('oklab-b-val');
 
+const oklchLVal = document.getElementById('oklch-l-val');
+const oklchCVal = document.getElementById('oklch-c-val');
+const oklchHVal = document.getElementById('oklch-h-val');
+
 const ycbcrYVal = document.getElementById('ycbcr-y-val');
 const ycbcrCbVal = document.getElementById('ycbcr-cb-val');
 const ycbcrCrVal = document.getElementById('ycbcr-cr-val');
@@ -484,9 +574,8 @@ const hsvAxis = document.getElementById('hsv-axis');
 const srgbAxis = document.getElementById('srgb-axis');
 const cmykAxis = document.getElementById('cmyk-axis');
 const oklabAxis = document.getElementById('oklab-axis');
+const oklchAxis = document.getElementById('oklch-axis');
 const ycbcrAxis = document.getElementById('ycbcr-axis');
-
-// ----- Updates----- \\
 
 function updateValues(rgbR, rgbG, rgbB,
                       hslH, hslS, hslL,
@@ -494,39 +583,37 @@ function updateValues(rgbR, rgbG, rgbB,
                       cmykC, cmykM, cmykY, cmykK,
                       srgbR_lin8, srgbG_lin8, srgbB_lin8,
                       okLabL, okLabA, okLabB,
+                      okLchL, okLchC, okLchH,
                       ycbcrY, ycbcrCb, ycbcrCr) {
-  // RGB (gamma) UI
   rgbRed.value = Math.round(clamp(Number(rgbR), 0, 255));
   rgbGreen.value = Math.round(clamp(Number(rgbG), 0, 255));
   rgbBlue.value = Math.round(clamp(Number(rgbB), 0, 255));
 
-  // HSL UI
   hslHue.value = Math.round(clamp(Number(hslH), 0, 360));
   hslSaturation.value = clamp(Number(hslS), 0, 100);
   hslLightness.value = clamp(Number(hslL), 0, 100);
 
-  // HSV UI
   hsvHue.value = Math.round(clamp(Number(hsvH), 0, 360));
   hsvSaturation.value = clamp(Number(hsvS), 0, 100);
   hsvValue.value = clamp(Number(hsvV), 0, 100);
 
-  // CMYK UI
   cmykCyan.value = clamp(Number(cmykC), 0, 100);
   cmykMagenta.value = clamp(Number(cmykM), 0, 100);
   cmykYellow.value = clamp(Number(cmykY), 0, 100);
   cmykBlack.value = clamp(Number(cmykK), 0, 100);
 
-  // SRGB (linear) UI - these are linear values scaled to 0..255
   srgbRed.value = Math.round(clamp(Number(srgbR_lin8), 0, 255));
   srgbGreen.value = Math.round(clamp(Number(srgbG_lin8), 0, 255));
   srgbBlue.value = Math.round(clamp(Number(srgbB_lin8), 0, 255));
 
-  // Oklab UI
   oklabL.value = clamp(Number(okLabL), 0, 100);
   oklabA.value = clamp(Number(okLabA), -150, 150);
   oklabB.value = clamp(Number(okLabB), -150, 150);
 
-  // Text values
+  oklchL.value = clamp(Number(okLchL), 0, 100);
+  oklchC.value = clamp(Number(okLchC), 0, 100);
+  oklchH.value = clamp(Number(okLchH), 0, 360);
+
   rgbRedVal.textContent = Math.round(clamp(Number(rgbR), 0, 255));
   rgbGreenVal.textContent = Math.round(clamp(Number(rgbG), 0, 255));
   rgbBlueVal.textContent = Math.round(clamp(Number(rgbB), 0, 255));
@@ -551,6 +638,10 @@ function updateValues(rgbR, rgbG, rgbB,
   oklabLVal.textContent = Number(okLabL).toFixed(3);
   oklabAVal.textContent = Number(okLabA).toFixed(3);
   oklabBVal.textContent = Number(okLabB).toFixed(3);
+
+  oklchLVal.textContent = clamp(Number(okLchL), 0, 100);
+  oklchCVal.textContent = clamp(Number(okLchC), 0, 100);
+  oklchHVal.textContent = clamp(Number(okLchH), 0, 360);
 
   ycbcrYVal.textContent = Number(ycbcrY).toFixed(3);
   ycbcrCbVal.textContent = Number(ycbcrCb).toFixed(3);
@@ -825,6 +916,44 @@ function updateValues(rgbR, rgbG, rgbB,
       });
       break;
   }
+  switch (oklchAxis.value) {
+    case 'L':
+      renderColorSliceUnified({
+        canvas: document.getElementById('oklch-canvas'),
+        width: 256,
+        height: 256,
+        space: 'oklch',
+        xChannel: 'c',
+        yChannel: 'h',
+        locked: { L: okLchL },
+        markerSpace: [okLchL, okLchC, okLchH],
+      });
+      break;
+    case 'c':
+      renderColorSliceUnified({
+        canvas: document.getElementById('oklab-canvas'),
+        width: 256,
+        height: 256,
+        space: 'oklch',
+        xChannel: 'L',
+        yChannel: 'h',
+        locked: { c: okLchC },
+        markerSpace: [okLchL, okLchC, okLchH],
+      });
+      break;
+    case 'h':
+      renderColorSliceUnified({
+        canvas: document.getElementById('oklab-canvas'),
+        width: 256,
+        height: 256,
+        space: 'oklch',
+        xChannel: 'L',
+        yChannel: 'c',
+        locked: { H: okLchH },
+        markerSpace: [okLchL, okLchC, okLchH],
+      });
+      break;
+  }
   switch (ycbcrAxis.value) {
     case 'y':
       renderColorSliceUnified({
@@ -865,31 +994,25 @@ function updateValues(rgbR, rgbG, rgbB,
   }
 }
 
-// When changing gamma RGB UI: update everything else
 function updateFromRgb() {
   const rgb_R = Math.round(clamp(Number(rgbRed.value), 0, 255));
   const rgb_G = Math.round(clamp(Number(rgbGreen.value), 0, 255));
   const rgb_B = Math.round(clamp(Number(rgbBlue.value), 0, 255));
 
-  // Normal gamma-space derived values
   const [hsl_H, hsl_S, hsl_L] = rgbToHsl(rgb_R, rgb_G, rgb_B);
 
   const [hsv_H, hsv_S, hsv_V] = rgbToHsv(rgb_R, rgb_G, rgb_B);
   const [cmyk_C, cmyk_M, cmyk_Y, cmyk_K] = rgbToCmyk(rgb_R, rgb_G, rgb_B);
 
-  // Convert gamma 0..255 to linear 0..1 for Oklab and linear UI
   const [r_lin, g_lin, b_lin] = srgb8ToLinearRgb([rgb_R, rgb_G, rgb_B]);
 
-  // Oklab from linear
   const [oklab_L, oklab_A, oklab_B] = rgbToOklab_linear01(r_lin, g_lin, b_lin);
+  const [oklch_L, oklch_C, oklch_H] = rgbToOklch_linear01(r_lin, g_lin, b_lin);
 
-  // Oklab from linear
   const [ycbcr_Y, ycbcr_Cb, ycbcr_Cr] = rgbToYCbCr_limited(r_lin, g_lin, b_lin);
 
-  // Linear UI (scaled to 0..255)
   const [sr_lin_R8, sr_lin_G8, sr_lin_B8] = linearRgbToLinear8([r_lin, g_lin, b_lin]);
 
-  // SRGB UI (gamma) - keep consistent with rgb UI
   const [srgb_R_ui, srgb_G_ui, srgb_B_ui] = [rgb_R, rgb_G, rgb_B];
 
   updateValues(
@@ -899,29 +1022,26 @@ function updateFromRgb() {
     cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
     sr_lin_R8, sr_lin_G8, sr_lin_B8,
     oklab_L, oklab_A, oklab_B,
+    oklch_L, oklch_C, oklch_H,
     ycbcr_Y, ycbcr_Cb, ycbcr_Cr,
   );
 }
 
-// When changing the linear ("srgb") UI: translate linear->gamma and update everything
 function updateFromSrgb() {
-  // SRGB* inputs are linear values scaled to 0..255
   const sR8 = Math.round(clamp(Number(srgbRed.value), 0, 255));
   const sG8 = Math.round(clamp(Number(srgbGreen.value), 0, 255));
   const sB8 = Math.round(clamp(Number(srgbBlue.value), 0, 255));
 
-  // Linear 0..1
   const [r_lin, g_lin, b_lin] = linear8ToLinearRgb([sR8, sG8, sB8]);
 
-  // Gamma 0..255 for rgb UI and other functions expecting gamma
   const [rgb_R, rgb_G, rgb_B] = linearRgbToSrgb8([r_lin, g_lin, b_lin]);
 
   const [hsl_H, hsl_S, hsl_L] = rgbToHsl(rgb_R, rgb_G, rgb_B);
   const [hsv_H, hsv_S, hsv_V] = rgbToHsv(rgb_R, rgb_G, rgb_B);
   const [cmyk_C, cmyk_M, cmyk_Y, cmyk_K] = rgbToCmyk(rgb_R, rgb_G, rgb_B);
 
-  // Oklab directly from linear
   const [oklab_L, oklab_A, oklab_B] = rgbToOklab_linear01(r_lin, g_lin, b_lin);
+  const [oklch_L, oklch_C, oklch_H] = rgbToOklch_linear01(r_lin, g_lin, b_lin);
   const [ycbcr_Y, ycbcr_Cb, ycbcr_Cr] = rgbToYCbCr_limited(r_lin, g_lin, b_lin);
 
   updateValues(
@@ -931,10 +1051,11 @@ function updateFromSrgb() {
     cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
     sR8, sG8, sB8,
     oklab_L, oklab_A, oklab_B,
+    oklch_L, oklch_C, oklch_H,
+    ycbcr_Y, ycbcr_Cb, ycbcr_Cr,
   );
 }
 
-// When changing HSL: HSL->RGB (gamma), then linear for Oklab and linear UI
 function updateFromHsl() {
   const hsl_H = Number(hslHue.value);
   const hsl_S = Number(hslSaturation.value);
@@ -946,6 +1067,7 @@ function updateFromHsl() {
 
   const [r_lin, g_lin, b_lin] = srgb8ToLinearRgb([rgb_R, rgb_G, rgb_B]);
   const [oklab_L, oklab_A, oklab_B] = rgbToOklab_linear01(r_lin, g_lin, b_lin);
+  const [oklch_L, oklch_C, oklch_H] = rgbToOklch_linear01(r_lin, g_lin, b_lin);
   const [ycbcr_Y, ycbcr_Cb, ycbcr_Cr] = rgbToYCbCr_limited(r_lin, g_lin, b_lin);
 
   const [sr_lin_R8, sr_lin_G8, sr_lin_B8] = linearRgbToLinear8([r_lin, g_lin, b_lin]);
@@ -957,11 +1079,11 @@ function updateFromHsl() {
     cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
     sr_lin_R8, sr_lin_G8, sr_lin_B8,
     oklab_L, oklab_A, oklab_B,
+    oklch_L, oklch_C, oklch_H,
     ycbcr_Y, ycbcr_Cb, ycbcr_Cr,
   );
 }
 
-// When changing HSV: HSV->RGB (gamma), then linear for Oklab and linear UI
 function updateFromHsv() {
   const hsv_H = Number(hsvHue.value);
   const hsv_S = Number(hsvSaturation.value);
@@ -974,6 +1096,7 @@ function updateFromHsv() {
 
   const [r_lin, g_lin, b_lin] = srgb8ToLinearRgb([rgb_R, rgb_G, rgb_B]);
   const [oklab_L, oklab_A, oklab_B] = rgbToOklab_linear01(r_lin, g_lin, b_lin);
+  const [oklch_L, oklch_C, oklch_H] = rgbToOklch_linear01(r_lin, g_lin, b_lin);
   const [ycbcr_Y, ycbcr_Cb, ycbcr_Cr] = rgbToYCbCr_limited(r_lin, g_lin, b_lin);
 
   const [sr_lin_R8, sr_lin_G8, sr_lin_B8] = linearRgbToLinear8([r_lin, g_lin, b_lin]);
@@ -985,11 +1108,11 @@ function updateFromHsv() {
     cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
     sr_lin_R8, sr_lin_G8, sr_lin_B8,
     oklab_L, oklab_A, oklab_B,
+    oklch_L, oklch_C, oklch_H,
     ycbcr_Y, ycbcr_Cb, ycbcr_Cr,
   );
 }
 
-// When changing CMYK: CMYK->RGB (gamma), then linear for Oklab and linear UI
 function updateFromCmyk() {
   const cmyk_C = Number(cmykCyan.value);
   const cmyk_M = Number(cmykMagenta.value);
@@ -1002,6 +1125,7 @@ function updateFromCmyk() {
 
   const [r_lin, g_lin, b_lin] = srgb8ToLinearRgb([rgb_R, rgb_G, rgb_B]);
   const [oklab_L, oklab_A, oklab_B] = rgbToOklab_linear01(r_lin, g_lin, b_lin);
+  const [oklch_L, oklch_C, oklch_H] = rgbToOklch_linear01(r_lin, g_lin, b_lin);
   const [ycbcr_Y, ycbcr_Cb, ycbcr_Cr] = rgbToYCbCr_limited(r_lin, g_lin, b_lin);
 
   const [sr_lin_R8, sr_lin_G8, sr_lin_B8] = linearRgbToLinear8([r_lin, g_lin, b_lin]);
@@ -1013,29 +1137,26 @@ function updateFromCmyk() {
     cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
     sr_lin_R8, sr_lin_G8, sr_lin_B8,
     oklab_L, oklab_A, oklab_B,
+    oklch_L, oklch_C, oklch_H,
     ycbcr_Y, ycbcr_Cb, ycbcr_Cr,
   );
 }
 
-// When changing Oklab: convert Oklab -> linear (0..1), clamp/gamut-map, convert to gamma for RGB UI and to linear8 for srgb UI, derive HSL/CMYK
 function updateFromOklab() {
   const oklab_L_val = Number(oklabL.value);
   const oklab_A_val = Number(oklabA.value);
   const oklab_B_val = Number(oklabB.value);
 
-  // Linear RGB from Oklab
   let [r_lin, g_lin, b_lin] = oklabToRgb_linear01(oklab_L_val, oklab_A_val, oklab_B_val);
 
-  // Clamp out-of-gamut values before converting to UI
   r_lin = clamp(r_lin, 0, 1);
   g_lin = clamp(g_lin, 0, 1);
   b_lin = clamp(b_lin, 0, 1);
 
-  // Linear UI (0..255)
   const [sr_lin_R8, sr_lin_G8, sr_lin_B8] = linearRgbToLinear8([r_lin, g_lin, b_lin]);
+  const [oklch_L, oklch_C, oklch_H] = rgbToOklch_linear01(r_lin, g_lin, b_lin);
   const [ycbcr_Y, ycbcr_Cb, ycbcr_Cr] = rgbToYCbCr_limited(r_lin, g_lin, b_lin);
 
-  // Gamma 0..255 for rgb UI
   const [rgb_R, rgb_G, rgb_B] = linearRgbToSrgb8([r_lin, g_lin, b_lin]);
 
   const [hsl_H, hsl_S, hsl_L] = rgbToHsl(rgb_R, rgb_G, rgb_B);
@@ -1049,29 +1170,26 @@ function updateFromOklab() {
     cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
     sr_lin_R8, sr_lin_G8, sr_lin_B8,
     oklab_L_val, oklab_A_val, oklab_B_val,
+    oklch_L, oklch_C, oklch_H,
     ycbcr_Y, ycbcr_Cb, ycbcr_Cr,
   );
 }
 
-// When changing Oklab: convert Oklab -> linear (0..1), clamp/gamut-map, convert to gamma for RGB UI and to linear8 for srgb UI, derive HSL/CMYK
-function updateFromYcbcr() {
-  const ycbcr_Y_val = Number(ycbcrY.value);
-  const ycbcr_Cb_val = Number(ycbcrCb.value);
-  const ycbcr_Cr_val = Number(ycbcrCr.value);
+function updateFromOklch() {
+  const oklch_L_val = Number(oklchL.value);
+  const oklch_C_val = Number(oklchC.value);
+  const oklch_H_val = Number(oklchH.value);
 
-  // Linear RGB from Oklab
-  let [r_lin, g_lin, b_lin] = ycbcrToRgb_limited(ycbcr_Y_val, ycbcr_Cb_val, ycbcr_Cr_val);
+  let [r_lin, g_lin, b_lin] = oklchToRgb_linear01(oklch_L_val, oklch_C_val, oklch_H_val);
 
-  // Clamp out-of-gamut values before converting to UI
   r_lin = clamp(r_lin, 0, 1);
   g_lin = clamp(g_lin, 0, 1);
   b_lin = clamp(b_lin, 0, 1);
 
-  // Linear UI (0..255)
   const [sr_lin_R8, sr_lin_G8, sr_lin_B8] = linearRgbToLinear8([r_lin, g_lin, b_lin]);
   const [oklab_L, oklab_A, oklab_B] = rgbToOklab_linear01(r_lin, g_lin, b_lin);
+  const [ycbcr_Y, ycbcr_Cb, ycbcr_Cr] = rgbToYCbCr_limited(r_lin, g_lin, b_lin);
 
-  // Gamma 0..255 for rgb UI
   const [rgb_R, rgb_G, rgb_B] = linearRgbToSrgb8([r_lin, g_lin, b_lin]);
 
   const [hsl_H, hsl_S, hsl_L] = rgbToHsl(rgb_R, rgb_G, rgb_B);
@@ -1085,6 +1203,40 @@ function updateFromYcbcr() {
     cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
     sr_lin_R8, sr_lin_G8, sr_lin_B8,
     oklab_L, oklab_A, oklab_B,
+    oklch_L_val, oklch_C_val, oklch_H_val,
+    ycbcr_Y, ycbcr_Cb, ycbcr_Cr,
+  );
+}
+
+function updateFromYcbcr() {
+  const ycbcr_Y_val = Number(ycbcrY.value);
+  const ycbcr_Cb_val = Number(ycbcrCb.value);
+  const ycbcr_Cr_val = Number(ycbcrCr.value);
+
+  let [r_lin, g_lin, b_lin] = ycbcrToRgb_limited(ycbcr_Y_val, ycbcr_Cb_val, ycbcr_Cr_val);
+
+  r_lin = clamp(r_lin, 0, 1);
+  g_lin = clamp(g_lin, 0, 1);
+  b_lin = clamp(b_lin, 0, 1);
+
+  const [sr_lin_R8, sr_lin_G8, sr_lin_B8] = linearRgbToLinear8([r_lin, g_lin, b_lin]);
+  const [oklch_L, oklch_C, oklch_H] = rgbToOklch_linear01(r_lin, g_lin, b_lin);
+  const [oklab_L, oklab_A, oklab_B] = rgbToOklab_linear01(r_lin, g_lin, b_lin);
+
+  const [rgb_R, rgb_G, rgb_B] = linearRgbToSrgb8([r_lin, g_lin, b_lin]);
+
+  const [hsl_H, hsl_S, hsl_L] = rgbToHsl(rgb_R, rgb_G, rgb_B);
+  const [hsv_H, hsv_S, hsv_V] = rgbToHsv(rgb_R, rgb_G, rgb_B);
+  const [cmyk_C, cmyk_M, cmyk_Y, cmyk_K] = rgbToCmyk(rgb_R, rgb_G, rgb_B);
+
+  updateValues(
+    rgb_R, rgb_G, rgb_B,
+    hsl_H, hsl_S, hsl_L,
+    hsv_H, hsv_S, hsv_V,
+    cmyk_C, cmyk_M, cmyk_Y, cmyk_K,
+    sr_lin_R8, sr_lin_G8, sr_lin_B8,
+    oklab_L, oklab_A, oklab_B,
+    oklch_L, oklch_C, oklch_H,
     ycbcr_Y_val, ycbcr_Cb_val, ycbcr_Cr_val,
   );
 }
@@ -1112,11 +1264,15 @@ function renderColorSliceUnified({
   const { data } = img;
 
   let ptr = 0;
+
+  const xNorms = Array.from({ length: width }, (_, x) => x / (width - 1));
+  const yNorms = Array.from({ length: height }, (_, y) => y / (height - 1));
+
   for (let py = 0; py < height; py++) {
-    const yNorm = py / (height - 1);
+    const yNorm = yNorms[py];
 
     for (let px = 0; px < width; px++) {
-      const xNorm = px / (width - 1);
+      const xNorm = xNorms[px];
 
       // 1) space-specific mapping (x,y ? full coords)
       const coords = cs.mapPixel({
@@ -1226,8 +1382,16 @@ function computeMarkerPosition({
   e.addEventListener('input', updateFromOklab);
 });
 
+[oklchL, oklchC, oklchH].forEach((e) => {
+  e.addEventListener('input', updateFromOklch);
+});
+
 [ycbcrY, ycbcrCb, ycbcrCr].forEach((e) => {
   e.addEventListener('input', updateFromYcbcr);
+});
+
+[rgbAxis, hslAxis, hsvAxis, cmykAxis, srgbAxis, oklabAxis, oklchAxis, ycbcrAxis].forEach((e) => {
+  e.addEventListener('change', updateFromRgb);
 });
 
 const ChannelRanges = {
@@ -1259,6 +1423,12 @@ const ChannelRanges = {
     L: [0, 100],
     a: [-50, 50],
     b: [-50, 50],
+  },
+
+  oklch: {
+    L: [0, 100],
+    c: [0, 100],
+    h: [0, 360],
   },
 
   cmyk: {
@@ -1399,6 +1569,29 @@ const ColorSpaces = {
     },
   },
 
+  oklch: {
+    channels: ['L', 'c', 'h'],
+
+    mapPixel({
+      x,
+      y,
+      xChannel,
+      yChannel,
+      locked,
+    }) {
+      const v = { ...locked };
+
+      v[xChannel] = denormalize('oklch', xChannel, x);
+      v[yChannel] = denormalize('oklch', yChannel, y);
+
+      return [v.L ?? 0, v.c ?? 0, v.h ?? 0];
+    },
+
+    toRgb([L, c, h]) {
+      return linearRgbToLinear8(oklchToRgb_linear01(L, c, h));
+    },
+  },
+
   cmyk: {
     channels: ['c', 'm', 'y', 'k'],
 
@@ -1436,22 +1629,14 @@ const ColorSpaces = {
     v[xChannel] = denormalize('ycbcr', xChannel, x);
     v[yChannel] = denormalize('ycbcr', yChannel, y);
 
-    // Supply defaults so callers always get three numbers
     return [v.Y ?? 16, v.Cb ?? 128, v.Cr ?? 128];
   },
 
-  /*
-   * Accepts UI-limited YCbCr (Y:16..235, Cb/Cr:16..240) and returns linear RGB 0..1
-   * then maps linear RGB to whatever linear8 wrapper your code expects.
-   */
-
   toRgb([Y, Cb, Cr]) {
-    // Use the same conversion as earlier (BT.709 studio range)
     function ycbcrToRgb_limited(Yint, CbInt, CrInt) {
       const Kr = 0.2126;
       const Kg = 0.7152;
       const Kb = 0.0722;
-
       const Y_MIN = 16.0;
       const Y_MAX = 235.0;
       const C_MIN = 16.0;
@@ -1473,7 +1658,7 @@ const ColorSpaces = {
 
     const linearRgb = ycbcrToRgb_limited(Y, Cb, Cr);
 
-    return linearRgbToLinear8(linearRgb);
+    return linearRgbToSrgb8(linearRgb);
   },
 },
 
